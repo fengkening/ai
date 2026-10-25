@@ -4,16 +4,51 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      arch:
+        description: "目标架构（both = arm64 + amd64）"
+        type: choice
+        options:
+          - both
+          - arm64
+          - amd64
+        default: both
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      arch: ${{ steps.set.outputs.arch }}
+    steps:
+      - id: set
+        name: 计算目标架构
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARCH="${{ inputs.arch }}"
+          else
+            ARCH="both"
+          fi
+          case "$ARCH" in
+            both)  MATRIX='["arm64","amd64"]' ;;
+            arm64) MATRIX='["arm64"]' ;;
+            amd64) MATRIX='["amd64"]' ;;
+            *) echo "未知架构: $ARCH"; exit 1 ;;
+          esac
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "arch=$ARCH" >> "$GITHUB_OUTPUT"
+          echo "目标架构: $ARCH → $MATRIX"
+
   build:
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        goarch: [arm64, amd64]
+        goarch: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +74,7 @@ jobs:
           path: dist/*
 
   release:
-    needs: build
+    needs: [prepare, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
